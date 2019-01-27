@@ -1,0 +1,26 @@
+version: '3.7'
+
+services:
+  proxy:
+    build: .
+    tty: true
+    stdin_open: true
+    volumes:
+      - .:/app
+    ports:
+      - 9000:9000
+  upstream:
+    image: nginx
+    ports:
+      - 8000:80
+  wrk:
+    image: williamyeh/wrk
+    tty: true
+    stdin_open: true
+    entrypoint: sh
+
+  hey:
+    build: hey
+    tty: true
+    stdin_open: true
+    entrypoint: sh

@@ -57,57 +57,91 @@ def graceful_server(endpoint, condition = nil, &block)
 	end
 end
 
-def echo_server(endpoint)
+
+def proxy_server(endpoint, endpoint_upstream)
 	condition = Async do |task|
 		task.sleep 60 while true
 	end
+	connections = {}
+	upstream_read_size = 0
+	client_read_size = 0
+
+	counts = {
+		errno_eprototype: 0,
+		errno_epipe: 0,
+		errno_econnrefused: 0,
+		connections: 0
+	}
+	Async do |task|
+		loop do
+			p [
+					"conns", connections.size,
+					"connh", counts[:connections],
+					"eprot", counts[:errno_eprototype],
+					"epipe", counts[:errno_epipe],
+					"econr", counts[:errno_econnrefused],
+					"urs", upstream_read_size,
+					"crs", client_read_size
+				]
+			task.sleep 0.1
+		end
+	end
 
 	graceful_server(endpoint, condition) do |client, task:|
+		connections[client.object_id] = true
+		counts[:connections] += 1
 		# This is an asynchronous block within the current reactor:
-		while data = client.read(512)
-			# This produces out-of-order responses.
-			task.sleep(rand * 0.01)
+		endpoint_upstream.connect do |upstream|
+			uptream_reader_task = task.async do
+				while data_from_upstream = upstream.read(1024)
+					upstream_read_size = data_from_upstream.size
+					client.write data_from_upstream
+				end
+			rescue Errno::EPROTOTYPE
+				counts[:errno_eprototype] =+ 1
+				# ?? mac?
+			rescue Errno::EPIPE
+				counts[:errno_epipe] =+ 1
+				# Client lost?
+			rescue Errno::ECONNREFUSED
+				counts[:errno_econnrefused] =+ 1
 
-			client.write(data.reverse)
+				print "."
+				task.sleep 0.1
+				retry
+			end
+
+			begin
+				while data_for_upstream = client.read(1024)
+					client_read_size = data_for_upstream.size
+
+					upstream.write data_for_upstream
+				end
+			rescue Errno::ECONNRESET
+				print "E"
+			end
+		ensure
+			#Async.logger.info "closing upstream reader task ..."
+			uptream_reader_task.stop
+			#Async.logger.info "closing connection to upstream ..."
+			upstream.close
 		end
+
 	ensure
+		connections.delete client.object_id
 		client.close
 	end
-
-	return condition
 end
 
-def echo_client(endpoint, data)
-	Async do |task|
-		endpoint.connect do |peer|
-			10.times do
-				Async.logger.info "Client #{data}: sleeping"
-				task.sleep 2
-
-				result = peer.write(data)
-				message = peer.read(512)
-
-				Async.logger.info "Sent #{data}, got response: #{message}"
-			end
-		end
-	end
-end
 
 Async do |task|
 	endpoint = Async::IO::Endpoint.tcp('0.0.0.0', 9000)
+	endpoint_upstream = Async::IO::Endpoint.parse ARGV[0]
 
 	Async.logger.info "Starting server..."
-	server = echo_server(endpoint)
+	server = proxy_server(endpoint, endpoint_upstream)
 
-	Async.logger.info "Clients connecting..."
-	1.times.collect do |i|
-		echo_client(endpoint, "Hello World #{i}")
-	end
-
-	task.sleep 5
-
-	Async.logger.info "Stopping server..."
-	server.stop
+#	server.stop
 end
 
 Async.logger.info "Finished..."

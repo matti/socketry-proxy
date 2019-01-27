@@ -1,0 +1,20 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    async (1.15.1)
+      nio4r (~> 2.3)
+      timers (~> 4.1)
+    async-io (1.18.2)
+      async (~> 1.14)
+    nio4r (2.3.1)
+    timers (4.3.0)
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  async
+  async-io
+
+BUNDLED WITH
+   1.17.2
